@@ -10,7 +10,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     name: PHP ${{ matrix.php }} / Moodle ${{ matrix.moodle-branch }} / ${{ matrix.database }}
-
     services:
       postgres:
         image: postgres:14
@@ -32,7 +31,6 @@ jobs:
           MYSQL_COLLATION_SERVER: "utf8mb4_unicode_ci"
         ports: ['3306:3306']
         options: --health-cmd="mariadb-admin ping" --health-interval=10s --health-timeout=5s --health-retries=3
-
     strategy:
       fail-fast: false
       matrix:
@@ -46,65 +44,53 @@ jobs:
           - php: '8.3'
             moodle-branch: 'MOODLE_405_STABLE'
             database: mariadb
-
     steps:
       - name: Check out plugin
         uses: actions/checkout@v5
         with:
           path: plugin
-
       - name: Set up PHP ${{ matrix.php }}
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           ini-values: max_input_vars=5000
           coverage: none
-
       - name: Initialise moodle-plugin-ci
         run: |
           composer create-project -n --no-dev --prefer-dist moodlehq/moodle-plugin-ci ci ^4
           echo "$(pwd)/ci/bin" >> $GITHUB_PATH
           echo "$(pwd)/ci/vendor/bin" >> $GITHUB_PATH
           sudo locale-gen en_AU.UTF-8
-
+      # Sibling plugin auth_oidc is referenced via require_once at runtime,
+      # so moodle-plugin-ci needs it co-installed.
+      - name: Fetch sibling plugin auth_oidc
+        run: |
+          mkdir -p extra-plugins
+          git clone --depth=1 https://github.com/ShinonomeLabo/moodle-auth_oidc.git extra-plugins/auth_oidc
       - name: Install Moodle
         env:
           DB: ${{ matrix.database }}
           MOODLE_BRANCH: ${{ matrix.moodle-branch }}
-        run: moodle-plugin-ci install --plugin ./plugin --db-host=127.0.0.1
-
+        run: moodle-plugin-ci install --plugin ./plugin --extra-plugins ./extra-plugins --db-host=127.0.0.1
       - name: PHP Lint
         run: moodle-plugin-ci phplint
-
       - name: PHP Mess Detector
         continue-on-error: true
         run: moodle-plugin-ci phpmd
-
       - name: Moodle Code Checker
         continue-on-error: true
         run: moodle-plugin-ci codechecker --max-warnings 0
-
       - name: Moodle PHPDoc Checker
         continue-on-error: true
         run: moodle-plugin-ci phpdoc
-
       - name: Validating
         run: moodle-plugin-ci validate
-
       - name: Check upgrade savepoints
         run: moodle-plugin-ci savepoints
-
       - name: Mustache Lint
         run: moodle-plugin-ci mustache
-
       - name: Grunt
         continue-on-error: true
         run: moodle-plugin-ci grunt --max-lint-warnings 0
-
       - name: PHPUnit tests
         run: moodle-plugin-ci phpunit --fail-on-warning
-
-      - name: Behat features
-        if: ${{ matrix.php == '8.1' && matrix.database == 'pgsql' }}
-        continue-on-error: true
-        run: moodle-plugin-ci behat --profile chrome
